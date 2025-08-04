@@ -346,7 +346,7 @@
             BorderThickness="1"
             CornerRadius="8">
 
-            <liftui:ImageViewer ImageSource="{Binding DisplayCurrent.Frame}" />
+            <liftui:ImageViewer ImageSource="{Binding DisplayCurrent.Frame}" ShowImgMap="True" />
 
         </Border>
 

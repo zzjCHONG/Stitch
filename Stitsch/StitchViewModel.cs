@@ -2,15 +2,14 @@
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.WindowsAPICodePack.Dialogs;
 using OpenCvSharp;
+using Simscop.Pl.Core.Models;
 using Simscop.Pl.Core.Models.Advanced;
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Threading;
 using MessageBox = System.Windows.MessageBox;
-using Point = OpenCvSharp.Point;
 using Rect = OpenCvSharp.Rect;
 using Size = OpenCvSharp.Size;
 
@@ -56,11 +55,12 @@ namespace Stitsch
         {
             try
             {
-                var imageFiles = Directory.GetFiles(Root, "*.*").Where(f => 
-                f.EndsWith(".png", StringComparison.OrdinalIgnoreCase)|| 
-                f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)|| 
-                f.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)|| 
-                f.EndsWith(".tif", StringComparison.OrdinalIgnoreCase)) 
+                // 1. 获取图片文件
+                var imageFiles = Directory.GetFiles(Root, "*.*")
+                    .Where(f => f.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".tif", StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
                 if (imageFiles.Count == 0)
@@ -69,21 +69,15 @@ namespace Stitsch
                     return;
                 }
 
-                // 正则解析行列
+                // 2. 解析行列
                 var regex = new Regex(@"(\d+)_(\d+)");
-                var imageData = new List<(int Row, int Col, string Path)>();
-
-                foreach (var file in imageFiles)
-                {
-                    var fileName = Path.GetFileNameWithoutExtension(file);
-                    var match = regex.Match(fileName);
-                    if (match.Success)
-                    {
-                        int row = int.Parse(match.Groups[1].Value);
-                        int col = int.Parse(match.Groups[2].Value);
-                        imageData.Add((row, col, file));
-                    }
-                }
+                var imageData = imageFiles
+                    .Select(f => new { File = f, Match = regex.Match(Path.GetFileNameWithoutExtension(f)) })
+                    .Where(x => x.Match.Success)
+                    .Select(x => (Row: int.Parse(x.Match.Groups[1].Value),
+                                  Col: int.Parse(x.Match.Groups[2].Value),
+                                  Path: x.File))
+                    .ToList();
 
                 if (imageData.Count == 0)
                 {
@@ -91,57 +85,110 @@ namespace Stitsch
                     return;
                 }
 
-                // 获取最大行列
+                // 3. 最大行列
                 int maxRow = imageData.Max(i => i.Row);
                 int maxCol = imageData.Max(i => i.Col);
 
+                // 4. 样本图 & 拼接参数
                 var mode = ImreadModes.Grayscale;
-
                 var sample = Cv2.ImRead(imageData[0].Path, mode);
-                int tileWidth = sample.Width - XClipCount * 2;
-                int tileHeight = sample.Height - YClipCount * 2;
 
-                //// 创建大图
-                //var (Crop, Overlap, TileSize, MatSize) = CalculateTileInfo(XClipCount, YClipCount, sample.Width, sample.Height, maxCol, maxRow, IsBlenderMode, TransitionRegion);
-                //_stitchingMat = new Mat( MatSize.Height, MatSize.Width, sample.Type(), Scalar.All(0));
+                int cropX = 0;
+                int cropY = 0;
+                int overlapX = 0;
+                int overlapY = 0;
+                int tileWidth = 0;
+                int tileHeight = 0;
+                int stitchMatWidth = 0;
+                int stitchMatHeight = 0;
 
-                //创建大图
-               _stitchingMat = new Mat(tileHeight * maxRow, tileWidth * maxCol, sample.Type(), Scalar.All(0));
+                if (IsBlenderMode && TransitionRegion > 0)
+                {
+                    cropX = XClipCount + TransitionRegion / 2;
+                    cropY = YClipCount + TransitionRegion / 2;
+                    overlapX = TransitionRegion;
+                    overlapY = TransitionRegion;
+                    tileWidth = sample.Width - 2 * cropX;
+                    tileHeight = sample.Height - 2 * cropY;
+                    stitchMatWidth = tileWidth * maxCol - TransitionRegion * (maxCol - 1);
+                    stitchMatHeight = tileHeight * maxRow - TransitionRegion * (maxRow - 1);
+                }
+                else
+                {
+                    cropX = XClipCount;
+                    cropY = YClipCount;
+                    tileWidth = sample.Width - 2 * cropX;
+                    tileHeight = sample.Height - 2 * cropY;
+                    stitchMatWidth = tileWidth * maxCol;
+                    stitchMatHeight = tileHeight * maxRow;
+                }
+                _stitchingMat = new Mat(stitchMatHeight, stitchMatWidth, sample.Type(), Scalar.All(0));
 
-                // 拼接
                 foreach (var imgInfo in imageData)
                 {
                     var img = Cv2.ImRead(imgInfo.Path, mode);
+                    using var clip = new Mat(img, new Rect(cropX, cropY, tileWidth, tileHeight));
 
-                    Mat imgDispose = new();
-                    imgDispose = ImageFilterDispose(img);
-
-                    // 裁切 ROI
-                    var roiRect = new Rect(XClipCount, YClipCount, tileWidth, tileHeight);
-                    using var clip = new Mat(imgDispose, roiRect);
-
-                    int startX = (imgInfo.Col - 1) * tileWidth;
-                    int startY = (imgInfo.Row - 1) * tileHeight;
-
-                    clip.CopyTo(new Mat(_stitchingMat, new Rect(startX, startY, tileWidth, tileHeight)));
-                }
-
-                // 更新 UI 显示
-                Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    using Mat compressedImage = CompressImage_Resize(_stitchingMat);
-
-                    if (compressedImage.Type() == MatType.CV_8UC3)
+                    if (!IsBlenderMode)
                     {
-                        // 原始图像 _stitchingMat 为 8UC3
-                        var grayMat = new Mat();
-                        Cv2.CvtColor(compressedImage, compressedImage, ColorConversionCodes.BGR2GRAY);
+                        int startX = (imgInfo.Col - 1) * tileWidth;
+                        int startY = (imgInfo.Row - 1) * tileHeight;
+                        var pasteRect = new Rect(startX, startY, tileWidth, tileHeight);
+
+                        clip.CopyTo(new Mat(_stitchingMat, pasteRect));
+                        SafeSetImage(_stitchingMat);
                     }
+                    else
+                    {               
+                        int startX = (imgInfo.Col - 1) * (tileWidth - overlapX);
+                        int startY = (imgInfo.Row - 1) * (tileHeight - overlapY);
+                        var pasteRect = new Rect(startX, startY, tileWidth, tileHeight);
 
-                    DisplayCurrent.Original = compressedImage.Clone();
+                        var row = imgInfo.Row - 1;
+                        var col = imgInfo.Col - 1;
+                        var dst = _stitchingMat;
 
-                }, DispatcherPriority.Background);
+                        if (row == 0 && col == 0)
+                        {
+                            clip.CopyTo(new Mat(dst, pasteRect));
+                        }
+                        if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == maxCol - 1))
+                        {
+                            clip
+                                .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                .CopyTo(new Mat(dst, pasteRect));
+                        }
+                        else if (row % 2 == 0)
+                        {
+                            if (row == 0)
+                            {
+                                clip
+                                    .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                    .CopyTo(new Mat(dst, pasteRect));
+                            }
+                            else
+                            {
+                                clip
+                                    .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                    .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .CopyTo(new Mat(dst, pasteRect));
+                            }
+                        }
+                        else if (row % 2 == 1)
+                        {
+                            clip
+                                .BlenderRight(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)))
+                                .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                .CopyTo(new Mat(dst, pasteRect));
+                        }
+                        else
+                        {
+                            throw new NotImplementedException();
+                        }
 
+                        SafeSetImage(dst);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -174,7 +221,6 @@ namespace Stitsch
                 }
             }
         }
-
 
     }
 
@@ -213,37 +259,31 @@ namespace Stitsch
 
     public partial class StitchViewModel
     {
-        private (Rect Crop, Point Overlap, Size TileSize, Size MatSize) CalculateTileInfo(int xClipCount, int yClipCount, int subgraphWidth, int subgraphHeight, int cols, int rows, bool isBlenderMode = false, int transitionRegion = 0)
-        {
-            int cropX = xClipCount, cropY = yClipCount, overlapX = 0, overlapY = 0;
-            if (isBlenderMode && transitionRegion > 0)
-            {
-                cropX = (int)(transitionRegion * 0.5 + xClipCount);
-                cropY = (int)(transitionRegion * 0.5 + yClipCount);
-                overlapX = (transitionRegion - cropX + xClipCount) * 2;
-                overlapY = (transitionRegion - cropY + yClipCount) * 2;
-            }
-
-            int tileWidth = subgraphWidth - 2 * cropX;
-            int tileHeight = subgraphHeight - 2 * cropY;
-
-            if (tileWidth <= 0 || tileHeight <= 0)
-                throw new ArgumentException("xClipCount or yClipCount or transitionRegion not valid");
-
-            int matWidth = tileWidth * cols - overlapX * (cols - 1);
-            int matHeight = tileHeight * rows - overlapY * (rows - 1);
-
-            return (
-                new Rect(cropX, cropY, tileWidth, tileHeight),
-                new Point(overlapX, overlapY),
-                new Size(tileWidth, tileHeight),
-                new Size(matWidth, matHeight));
-        }
 
     }
 
     public partial class StitchViewModel
     {
+        void SafeSetImage(Mat stitching)
+        {
+            // 更新 UI 显示
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                using Mat compressedImage = CompressImage_Resize(stitching);
+
+                if (compressedImage.Type() == MatType.CV_8UC3)
+                {
+                    // 原始图像 _stitchingMat 为 8UC3
+                    var grayMat = new Mat();
+                    Cv2.CvtColor(compressedImage, compressedImage, ColorConversionCodes.BGR2GRAY);
+                }
+
+                DisplayCurrent.Original = compressedImage.Clone();
+
+            }, DispatcherPriority.Background);
+
+        }
+
         [ObservableProperty]
         private DisplayModel _displayCurrent = new();
 
