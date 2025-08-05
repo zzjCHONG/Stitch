@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Threading;
 using MessageBox = System.Windows.MessageBox;
 using Rect = OpenCvSharp.Rect;
@@ -23,16 +24,25 @@ namespace Stitsch
         private string _root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Stitch");
 
         [ObservableProperty]
-        private int _xClipCount = 112;
+        private int _xClipCount = 108;
 
         [ObservableProperty]
-        private int _yClipCount = 112;
+        private int _yClipCount = 109;
 
         [ObservableProperty]
-        private int _transitionRegion = 10;
+        private int _transitionRegionX = 108;
+
+        [ObservableProperty]
+        private int _transitionRegionY = 109;
 
         [ObservableProperty]
         private bool _isBlenderMode = false;
+
+        [ObservableProperty]
+        private bool _isAdjustExposure = false;
+
+        [ObservableProperty]
+        private bool _isIllumination = false;
 
         [RelayCommand]
         void Load()
@@ -102,16 +112,18 @@ namespace Stitsch
                 int stitchMatWidth = 0;
                 int stitchMatHeight = 0;
 
-                if (IsBlenderMode && TransitionRegion > 0)
+                if (IsBlenderMode && (TransitionRegionX > 0 || TransitionRegionY > 0))
                 {
-                    cropX = XClipCount + TransitionRegion / 2;
-                    cropY = YClipCount + TransitionRegion / 2;
-                    overlapX = TransitionRegion;
-                    overlapY = TransitionRegion;
+                    cropX = 0 + TransitionRegionX / 2;
+                    cropY = 0 + TransitionRegionY / 2;
+                    //cropX = XClipCount + TransitionRegionX / 2;//blender模式下，XClipCount裁切为0，TransitionRegionX代替裁切
+                    //cropY = YClipCount + TransitionRegionY / 2;
+                    overlapX = TransitionRegionX;
+                    overlapY = TransitionRegionY;
                     tileWidth = sample.Width - 2 * cropX;
                     tileHeight = sample.Height - 2 * cropY;
-                    stitchMatWidth = tileWidth * maxCol - TransitionRegion * (maxCol - 1);
-                    stitchMatHeight = tileHeight * maxRow - TransitionRegion * (maxRow - 1);
+                    stitchMatWidth = tileWidth * maxCol - TransitionRegionX * (maxCol - 1);
+                    stitchMatHeight = tileHeight * maxRow - TransitionRegionY * (maxRow - 1);
                 }
                 else
                 {
@@ -128,11 +140,16 @@ namespace Stitsch
                 {
                     var img = Cv2.ImRead(imgInfo.Path, mode);
 
-                    var imgAdjustExposure = AdjustExposure(img, sample);//根据第一张图做曝光补偿，再拼接
+                    if (DisposeIndex != 0)
+                        img = ImageFilterDispose(img);//图像滤波
 
-                    var imgIlluminationCompensate = IlluminationCompensateGray(imgAdjustExposure);
+                    if (IsAdjustExposure)
+                        img = AdjustExposure(img, sample);//根据第一张图做曝光补偿，再拼接
 
-                    using var clip = new Mat(imgIlluminationCompensate, new Rect(cropX, cropY, tileWidth, tileHeight));
+                    if (IsIllumination)
+                        img = IlluminationCompensateGray(img);//光照一致性
+
+                    using var clip = new Mat(img, new Rect(cropX, cropY, tileWidth, tileHeight));
 
                     if (!IsBlenderMode)
                     {
@@ -154,44 +171,88 @@ namespace Stitsch
                         var dst = _stitchingMat;
                         var cols = maxCol;
 
-                        if (row == 0 && col == 0)
+                        bool isBlenderMultiBand=true;
+
+                        if (!isBlenderMultiBand)
                         {
-                            clip.CopyTo(new Mat(dst, pasteRect));
-                        }
-                        if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == cols - 1))
-                        {
-                            clip
-                                .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
-                                .CopyTo(new Mat(dst, pasteRect));
-                        }
-                        else if (row % 2 == 0)
-                        {
-                            if (row == 0)
+                            if (row == 0 && col == 0)
+                            {
+                                clip.CopyTo(new Mat(dst, pasteRect));
+                            }
+                            if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == cols - 1))
                             {
                                 clip
-                                    .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                    .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .CopyTo(new Mat(dst, pasteRect));
+                            }
+                            else if (row % 2 == 0)
+                            {
+                                if (row == 0)
+                                {
+                                    clip
+                                        .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                        .CopyTo(new Mat(dst, pasteRect));
+                                }
+                                else
+                                {
+                                    clip
+                                        .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                        .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                        .CopyTo(new Mat(dst, pasteRect));
+                                }
+                            }
+                            else if (row % 2 == 1)
+                            {
+                                clip
+                                    .BlenderRight(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)))
+                                    .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
                                     .CopyTo(new Mat(dst, pasteRect));
                             }
                             else
                             {
-                                clip
-                                    .BlenderLeft(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
-                                    .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
-                                    .CopyTo(new Mat(dst, pasteRect));
+                                throw new NotImplementedException();
                             }
-                        }
-                        else if (row % 2 == 1)
-                        {
-                            clip
-                                .BlenderRight(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)))
-                                .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
-                                .CopyTo(new Mat(dst, pasteRect));
                         }
                         else
                         {
-                            throw new NotImplementedException();
+                            if (row == 0 && col == 0)
+                            {
+                                clip.CopyTo(new Mat(dst, pasteRect));
+                            }
+                            if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == cols - 1))
+                            {
+                                clip
+                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .CopyTo(new Mat(dst, pasteRect));
+                            }
+                            else if (row % 2 == 0)
+                            {
+                                if (row == 0)
+                                {
+                                    clip
+                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                        .CopyTo(new Mat(dst, pasteRect));
+                                }
+                                else
+                                {
+                                    clip
+                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                        .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                        .CopyTo(new Mat(dst, pasteRect));
+                                }
+                            }
+                            else if (row % 2 == 1)
+                            {
+                                clip
+                                    .BlenderRightMultiBand(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)))
+                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .CopyTo(new Mat(dst, pasteRect));
+                            }
+                            else
+                            {
+                                throw new NotImplementedException();
+                            }
                         }
-
                         SafeSetImage(dst);
                     }
                 }

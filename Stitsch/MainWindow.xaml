@@ -36,15 +36,99 @@
                     <Button Command="{Binding LoadCommand}" Content="Load" />
                     <Button Command="{Binding ApplyCommand}" Content="Apply" />
                     <Button Command="{Binding SaveCommand}" Content="Save" />
-                    <GroupBox Header="XClipCount">
+                    <GroupBox Margin="5" Header="XClipCount">
                         <liftui:NumericUpDown Minimum="0" Value="{Binding XClipCount}" />
                     </GroupBox>
-                    <GroupBox Header="YClipCount">
+                    <GroupBox Margin="5" Header="YClipCount">
                         <liftui:NumericUpDown Minimum="0" Value="{Binding YClipCount}" />
                     </GroupBox>
-                    <GroupBox Header="Filter">
+
+                </UniformGrid>
+
+                <UniformGrid Columns="3">
+
+                    <ToggleButton
+                        Margin="5"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Focusable="False"
+                        IsChecked="{Binding IsAdjustExposure}"
+                        Style="{DynamicResource ToggleButtonCustom}">
+                        <liftui:StatusSwitchElement.CheckedElement>
+                            <Border
+                                Background="{DynamicResource PrimaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5">
+                                <Label
+                                    Height="32"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Content="AdjustExposure"
+                                    FontSize="13"
+                                    Foreground="White" />
+                            </Border>
+                        </liftui:StatusSwitchElement.CheckedElement>
+                        <Border
+                            Background="{DynamicResource RegionBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="5">
+                            <Label
+                                Height="32"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Content="AdjustExposure"
+                                FontSize="13"
+                                Foreground="{DynamicResource PrimaryTextBrush}" />
+                        </Border>
+                    </ToggleButton>
+
+                    <ToggleButton
+                        Margin="5"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Focusable="False"
+                        IsChecked="{Binding IsIllumination}"
+                        Style="{DynamicResource ToggleButtonCustom}">
+                        <liftui:StatusSwitchElement.CheckedElement>
+                            <Border
+                                Background="{DynamicResource PrimaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5">
+                                <Label
+                                    Height="32"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Content="IlluminationCompensate"
+                                    FontSize="13"
+                                    Foreground="White" />
+                            </Border>
+                        </liftui:StatusSwitchElement.CheckedElement>
+                        <Border
+                            Background="{DynamicResource RegionBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="5">
+                            <Label
+                                Height="32"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Content="Illumination"
+                                FontSize="13"
+                                Foreground="{DynamicResource PrimaryTextBrush}" />
+                        </Border>
+                    </ToggleButton>
+
+                    <GroupBox
+                        Margin="5"
+                        Background="White"
+                        Header="Filter"
+                        Style="{DynamicResource GroupBoxTab}">
                         <ComboBox ItemsSource="{Binding DisposeMode}" SelectedIndex="{Binding DisposeIndex}" />
                     </GroupBox>
+
                 </UniformGrid>
 
                 <GroupBox
@@ -53,7 +137,7 @@
                     Header="Blender参数调整"
                     Style="{DynamicResource GroupBoxTab}"
                     Visibility="Visible">
-                    <UniformGrid Columns="2">
+                    <UniformGrid Columns="3">
                         <GroupBox
                             Margin="10,5"
                             HorizontalContentAlignment="Left"
@@ -99,13 +183,26 @@
                         <GroupBox
                             Margin="10,5"
                             HorizontalContentAlignment="Left"
-                            Header="过渡像素数"
+                            Header="过渡像素数X"
+                            IsEnabled="{Binding IsBlenderMode}"
                             Style="{DynamicResource GroupBoxOriginal}">
                             <liftui:NumericUpDown
                                 Height="32"
                                 Minimum="1"
                                 ValueFormat="N0"
-                                Value="{Binding TransitionRegion}" />
+                                Value="{Binding TransitionRegionX}" />
+                        </GroupBox>
+                        <GroupBox
+                            Margin="10,5"
+                            HorizontalContentAlignment="Left"
+                            Header="过渡像素数Y"
+                            IsEnabled="{Binding IsBlenderMode}"
+                            Style="{DynamicResource GroupBoxOriginal}">
+                            <liftui:NumericUpDown
+                                Height="32"
+                                Minimum="1"
+                                ValueFormat="N0"
+                                Value="{Binding TransitionRegionY}" />
                         </GroupBox>
                     </UniformGrid>
                 </GroupBox>
