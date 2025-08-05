@@ -127,7 +127,12 @@ namespace Stitsch
                 foreach (var imgInfo in imageData)
                 {
                     var img = Cv2.ImRead(imgInfo.Path, mode);
-                    using var clip = new Mat(img, new Rect(cropX, cropY, tileWidth, tileHeight));
+
+                    var imgAdjustExposure = AdjustExposure(img, sample);//根据第一张图做曝光补偿，再拼接
+
+                    var imgIlluminationCompensate = IlluminationCompensateGray(imgAdjustExposure);
+
+                    using var clip = new Mat(imgIlluminationCompensate, new Rect(cropX, cropY, tileWidth, tileHeight));
 
                     if (!IsBlenderMode)
                     {
@@ -147,12 +152,13 @@ namespace Stitsch
                         var row = imgInfo.Row - 1;
                         var col = imgInfo.Col - 1;
                         var dst = _stitchingMat;
+                        var cols = maxCol;
 
                         if (row == 0 && col == 0)
                         {
                             clip.CopyTo(new Mat(dst, pasteRect));
                         }
-                        if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == maxCol - 1))
+                        if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == cols - 1))
                         {
                             clip
                                 .BlenderTop(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
@@ -256,10 +262,84 @@ namespace Stitsch
         }
     }
 
-
     public partial class StitchViewModel
     {
+        static Mat AdjustExposure(Mat imgA, Mat imgB)
+        {
+            // 转灰度
+            Mat grayA = EnsureGray(imgA);
+            Mat grayB = EnsureGray(imgB);
 
+            // 计算均值
+            Scalar meanA = Cv2.Mean(grayA);
+            Scalar meanB = Cv2.Mean(grayB);
+
+            double alpha = meanB.Val0 / meanA.Val0;
+
+            // 调整 A 的亮度
+            Mat adjusted = new Mat();
+            imgA.ConvertTo(adjusted, imgA.Type(), alpha, 0);
+            return adjusted;
+        }
+
+        static Mat EnsureGray(Mat src)
+        {
+            // 如果是 8UC1 灰度图，直接返回
+            if (src.Type() == MatType.CV_8UC1)
+                return src.Clone();
+
+            // 如果是三通道或其他情况，转灰度
+            Mat gray = new Mat();
+            Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+            return gray;
+        }
+
+        static Mat IlluminationCompensate(Mat img)
+        {
+            Mat lowFreq = new Mat();
+            Cv2.GaussianBlur(img, lowFreq, new Size(51, 51), 0);
+
+            // 计算比例因子
+            Mat ratio = new Mat();
+            Cv2.Divide(lowFreq, Cv2.Mean(lowFreq), ratio);
+
+            // 修正图像
+            Mat result = new Mat();
+            Cv2.Divide(img, ratio, result);
+            return result;
+        }
+
+        Mat IlluminationCompensateGray(Mat grayImg)
+        {
+            if (grayImg.Type() != MatType.CV_8UC1)
+                throw new ArgumentException("输入必须是8UC1灰度图");
+
+            // 转换成浮点，方便计算
+            Mat grayFloat = new Mat();
+            grayImg.ConvertTo(grayFloat, MatType.CV_32F);
+
+            // 大核高斯模糊提取低频光照（核大小根据图像大小调整）
+            Mat illumination = new Mat();
+            int ksize = (grayImg.Width / 10) | 1; // 保证奇数
+            ksize = Math.Max(ksize, 1); // 最小31x31
+            Cv2.GaussianBlur(grayFloat, illumination, new Size(ksize, ksize), 0);
+
+            // 防止除零，阈值
+            double eps = 1e-3;
+            Cv2.Max(illumination, eps, illumination);
+
+            // 归一化处理：原图除以估计光照
+            Mat compensated = new Mat();
+            Cv2.Divide(grayFloat, illumination, compensated);
+
+            // 归一化回 0~255
+            Cv2.Normalize(compensated, compensated, 0, 255, NormTypes.MinMax);
+
+            Mat result = new Mat();
+            compensated.ConvertTo(result, MatType.CV_8UC1);
+
+            return result;
+        }
     }
 
     public partial class StitchViewModel
