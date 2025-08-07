@@ -42,7 +42,7 @@ namespace Stitsch
         private bool _isBlenderMultiBand = false;
 
         [ObservableProperty]
-        private bool _isIllumination = false;
+        private int _blenderMultiBandLevels = 1;
 
         [RelayCommand]
         void Load()
@@ -102,7 +102,7 @@ namespace Stitsch
                 int maxCol = imageData.Max(i => i.Col);
 
                 // 4. 样本图 & 拼接参数
-                var mode = ImreadModes.Grayscale;
+                var mode = ImreadModes.Unchanged;//Grayscale
                 var sample = Cv2.ImRead(imageData[0].Path, mode);
 
                 int cropX = 0;
@@ -216,6 +216,8 @@ namespace Stitsch
                         }
                         else
                         {
+                            int levels = BlenderMultiBandLevels;
+
                             if (row == 0 && col == 0)
                             {
                                 clip.CopyTo(new Mat(dst, pasteRect));
@@ -223,7 +225,7 @@ namespace Stitsch
                             if ((row % 2 == 0 && col == 0) || (row % 2 == 1 && col == cols - 1))
                             {
                                 clip
-                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)), levels)
                                     .CopyTo(new Mat(dst, pasteRect));
                             }
                             else if (row % 2 == 0)
@@ -231,22 +233,22 @@ namespace Stitsch
                                 if (row == 0)
                                 {
                                     clip
-                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
+                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)), levels)
                                         .CopyTo(new Mat(dst, pasteRect));
                                 }
                                 else
                                 {
                                     clip
-                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)))
-                                        .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                        .BlenderLeftMultiBand(new Mat(dst, new Rect(startX, startY, overlapX, tileHeight)), levels)
+                                        .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)), levels)
                                         .CopyTo(new Mat(dst, pasteRect));
                                 }
                             }
                             else if (row % 2 == 1)
                             {
                                 clip
-                                    .BlenderRightMultiBand(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)))
-                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)))
+                                    .BlenderRightMultiBand(new Mat(dst, new Rect(startX + tileWidth - overlapX, startY, overlapX, tileHeight)), levels)
+                                    .BlenderTopMultiBand(new Mat(dst, new Rect(startX, startY, tileWidth, overlapY)), levels)
                                     .CopyTo(new Mat(dst, pasteRect));
                             }
                             else
